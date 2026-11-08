@@ -1,48 +1,30 @@
-# Polynomial coefficients from roots in ACL2
+# Polynomial coefficients from roots in ACL2: rump-session development
 
-ACL2 formalization of the table-based construction of the coefficients of a
-monic polynomial from its roots, from the Spanish-language CVM 2026 papers by
-P. O. Cayuela (derivation and first ACL2 verification).
+Books for the ACL2 2026 Workshop rump session (#19, "Pencil, Chalkboard, Q.E.D.").
+They extend the book `poly-roots-coeffs.lisp` of the Spanish-language CVM 2026
+papers by P. O. Cayuela, which stays untouched, as published, in
+[acl2-poly-roots-coeffs](https://github.com/pcayuela/acl2-poly-roots-coeffs)
+(branch `main`). Nothing here changes that repository.
 
-## Branches
+## Branches (each one contains all the previous ones)
 
-* **`main`** keeps the book `poly-roots-coeffs.lisp` exactly as published and
-  cited in the CVM 2026 verification paper. Its only change since then is the
-  sign fix in `recursive_coefficientsv2.py` (`(-1)**(n - p)` instead of
-  `(-1)**p`, wrong for odd degree).
-* **`rumpsession`** (this branch) contains the work done for the ACL2 2026
-  Workshop rump session: the extended development below.
+| Branch | Adds | Flavours |
+|--------|------|----------|
+| `rumpsession` | guards, `cardano-vieta`, nested sums and chains, permutations, ACL2(r) examples | ACL2, ACL2(r) |
+| `newton-girard` | `poly-roots-newton-girard`: Newton-Girard identities, power sums | ACL2, ACL2(r) |
+| `traces-v4` | `poly-roots-traces` on Russinoff's `projects/linear` (frozen, as in slides v4) | ACL2 only |
+| `traces` | `poly-roots-traces`, self-contained: determinant by cofactors, characteristic polynomial of an upper-triangular matrix from the traces of its powers | ACL2, ACL2(r) |
+| `leibniz` / `main` | `poly-roots-leibniz`: the cofactor determinant equals Leibniz's formula (sum over permutations) | ACL2 only |
 
-## What this branch adds
-
-| File | Content |
-|------|---------|
-| `poly-roots-coeffs.lisp` | the original book with guards verified, the new theorem `cardano-vieta` (each coefficient is `(-1)^(n-k) * (elem-sym (n-k) roots)`), corrected comments about the order of the factors, and simplified proofs (one global `in-theory` event; no theorem statement of the original changed) |
-| `poly-roots-nested-sums.lisp` | the two nested sum-product formulas of the paper (eqs. (6) and (7)) as `desc-sum` and `asc-sum`, proved for every n and every p to equal the table coefficients up to `(-1)^(n-p)`, hence equal to each other |
-| `poly-roots-nested-chains.lisp` | the summands of the two nested sums as explicit chains of indices: each reading is the sum over its chains of the product of the picked roots; the mirror `i -> n+1-i` maps the chains of the descending reading exactly onto those of the ascending one (in reverse order); each reading has `C(n, n-p)` chains, none repeated, and they are exactly the strictly monotone chains of `n-p` indices from `1..n`: every set of `n-p` distinct roots appears in each reading exactly once |
-| `poly-roots-permutations.lisp` | order independence for arbitrary permutations of the roots, with the community `perm` (`kestrel/lists-light/perm`); the reversal theorem and the symmetry of `elem-sym` follow as corollaries |
-| `poly-roots-acl2r-examples.lisp` | ACL2(r) only: `(acl2-sqrt 2)` is irrational and the roots `+-sqrt(2)` give `x^2 - 2`; for any real `s`, `w` the conjugate poles `s +- jw` give `x^2 - 2s x + (s^2 + w^2)`, e.g. `-1 +- j sqrt(2)` gives `x^2 + 2x + 3`. Shows that the theorems above, which quantify over all ACL2 numbers, apply to irrational and complex roots |
-| `recursive_coefficientsv2.py` | the Python cross-check (sign fixed, as on `main`) |
-
-## Certifying
-
-The books certify with ACL2 8.7 and with ACL2(r) 8.7(r) (the theorems are about
-`acl2-numberp`, so they cover irrational and complex roots in ACL2(r)).
-From this directory, with the community books built:
-
-    cert.pl poly-roots-nested-sums poly-roots-nested-chains poly-roots-permutations
-
-and, with ACL2(r),
-
-    cert.pl poly-roots-acl2r-examples
-
-(`poly-roots-permutations.lisp` needs `kestrel/lists-light/perm` and `perm2`
-from the community books.)
+`main` is `leibniz` plus this README. Each branch certifies from a clean clone
+in ACL2 8.7 and ACL2(r) 8.7(r) (Docker image `ghcr.io/pcayuela/acl2-acl2r-docker:8.7`),
+except where the table says ACL2 only. Certify with `cert.pl <book>` from the
+directory of the books; books tagged `cert_param: (uses-acl2r)` are
+ACL2(r)-only, `(non-acl2r)` ACL2-only.
 
 ## Development
 
 The books were developed with the AI coding agent Claude Code driving a live
 ACL2 session through an MCP server. Only ACL2's certification counts as
 validation of the theorems; the correspondence between the theorem statements
-and the claims of the paper was checked by the author and by the reviewers of
-the workshop.
+and the claims of the slides was checked by the author.
