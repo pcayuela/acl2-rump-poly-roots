@@ -1,0 +1,3 @@
+;; Portcullis for poly-roots-leibniz.lisp: the "DM" package of
+;; books/projects/numbers, used by Russinoff's linear-algebra books.
+(include-book "projects/numbers/portcullis" :dir :system)
