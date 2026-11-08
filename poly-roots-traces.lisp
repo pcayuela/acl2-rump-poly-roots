@@ -4,39 +4,33 @@
 ;; Characteristic polynomial of an upper-triangular matrix, and its
 ;; coefficients computed from the traces of the powers of the matrix.
 ;;
-;; cert_param: (non-acl2r)
-;;
-;; This book is ACL2-only: it uses David Russinoff's linear-algebra books
-;; (books/projects/linear: ring, rmat, rdet), which depend on the RTL
-;; library, and the RTL library does not certify under ACL2(r).
+;; This book is self-contained: it needs no linear-algebra book and no RTL.
+;; It certifies in ACL2 8.7 and in ACL2(r) 8.7(r).
 ;;
 ;; It includes poly-roots-newton-girard (and through it poly-roots-coeffs)
 ;; and changes nothing in them.
 ;;
 ;; What is proved:
 ;;
-;;   1. RDET-UPPER-TRI-DIAG (in Russinoff's abstract commutative ring):
-;;      the determinant of an upper-triangular n x n matrix is the product
-;;      of its diagonal.  Proof: cofactor expansion along column 0
-;;      (Russinoff's EXPAND-RDET-COL-RDET) and induction on n through the
-;;      minor (0,0), which is again upper triangular.
+;;   1. LDET-UPPER-TRI: the determinant of an upper-triangular n x n matrix
+;;      of ACL2 numbers is the product of its diagonal.  The determinant is
+;;      LDET, the cofactor (Laplace) expansion along column 0:
+;;          det A = sum_i (-1)^i A[i][0] det(minor_{i,0} A).
+;;      The proof is induction on n: below the diagonal the column-0 entries
+;;      are 0, so only the term i = 0 survives, and the minor (0,0) is again
+;;      upper triangular.
 ;;
-;;   2. CDET-UPPER-TRI: the same theorem for matrices of ACL2 numbers, by
-;;      functional instantiation (ring := ACL2 numbers with +, *, 0, 1, -).
-;;      CDET, CMATP, C-UPPER-TRI, ... are the numeric copies of RDET,
-;;      RMATP, UPPER-TRI, ... that functional instantiation requires.
-;;
-;;   3. CHAR-POLY-UPPER-TRI: for an upper-triangular matrix A of ACL2
+;;   2. CHAR-POLY-UPPER-TRI: for an upper-triangular matrix A of ACL2
 ;;      numbers and every number s,
 ;;          det(s I - A) = (poly-eval (poly-from-roots diag(A)) s):
 ;;      the characteristic polynomial is the polynomial whose roots are
 ;;      the diagonal of A.
 ;;
-;;   4. CTRACE-CMAT-EXPT: tr(A^k) = power-sum of the diagonal, for A upper
+;;   3. CTRACE-CMAT-EXPT: tr(A^k) = power-sum of the diagonal, for A upper
 ;;      triangular (products of upper-triangular matrices are upper
 ;;      triangular, and their diagonals multiply).
 ;;
-;;   5. CHAR-POLY-FROM-TRACES (main theorem): with E-FROM-TRACES, which
+;;   4. CHAR-POLY-FROM-TRACES (main theorem): with E-FROM-TRACES, which
 ;;      runs the Newton-Girard recursion on tr(A), tr(A^2), ..., each
 ;;      coefficient of the characteristic polynomial of an upper-triangular
 ;;      A is (-1)^(n-k) times the head of (e-from-traces (n-k) A n): the
@@ -46,115 +40,54 @@
 ;;   - nothing for matrices that are not upper triangular: for a general
 ;;     matrix, the eigenvalues are not given, and the result needs more
 ;;     (Faddeev-LeVerrier, or triangularization over the complex numbers);
-;;   - the matrices are lists of rows of ACL2 numbers; the determinant is
-;;     Russinoff's (Leibniz formula over the symmetric group), instantiated.
+;;   - the determinant is defined by cofactor expansion along column 0.  It
+;;     is not proved here to coincide with the Leibniz formula over
+;;     permutations (the definition used by Russinoff's books in
+;;     books/projects/linear); for the matrices of this book, the
+;;     triangular ones, both are the product of the diagonal.
 ;;
-;; Certification: (certify-book "poly-roots-traces") with the portcullis
-;; in poly-roots-traces.acl2 (the "DM" package).  Certifying from scratch
-;; also certifies Russinoff's books and part of RTL (several minutes).
+;; Certification: (certify-book "poly-roots-traces").
 ;; ===========================================================================
 
-(in-package "DM")
+(in-package "ACL2")
 
-(include-book "projects/linear/rdet" :dir :system)
 (include-book "poly-roots-newton-girard")
 
-(defthm rdet-1x1
-  (implies (rmatp a 1 1)
-           (equal (rdet a 1) (entry 0 0 a)))
-  :hints (("Goal" :in-theory (enable rdet rdet-term)
-                  :expand ((rdet-prod a '(0) 1) (rdet-prod a '(0) 0))
-                  :use ((:instance rp-entry (i 0) (j 0) (m 1) (n 1))))))
-
+;; ======================= matrices as lists of rows
+(defun entry (i j a) (nth j (nth i a)))
 (in-theory (disable entry))
 
-;; upper triangular: entry (i,j) = r0 whenever j < i
-(defun lower-zero-row (a i j)
-  (if (zp j) t (and (equal (entry i (1- j) a) (r0)) (lower-zero-row a i (1- j)))))
-(defun upper-tri-aux (a i)
-  (if (zp i) t (and (lower-zero-row a (1- i) (1- i)) (upper-tri-aux a (1- i)))))
-(defun upper-tri (a n) (upper-tri-aux a n))
+;; delete row i / delete column 0
+(defun del-row (a i)
+  (if (consp a)
+      (if (zp i) (cdr a) (cons (car a) (del-row (cdr a) (1- i))))
+    nil))
+(defun del-col0 (a)
+  (if (consp a) (cons (cdr (car a)) (del-col0 (cdr a))) nil))
+(defun minor0 (a i) (del-col0 (del-row a i)))
+(defun cof-sign (i) (if (evenp i) 1 -1))
 
-(defthm lower-zero-row-entry
-  (implies (and (lower-zero-row a i j) (natp j) (natp k) (< k j))
-           (equal (entry i k a) (r0))))
+;; ======================= determinant: cofactor expansion along column 0
+;; LDET-SUM adds the terms i, i+1, ..., n-1 of the expansion of an n x n
+;; matrix; m = n-1 is the size of the minors.
+(mutual-recursion
+ (defun ldet (a n)
+   (declare (xargs :measure (make-ord 1 (1+ (nfix n)) 0)))
+   (if (zp n) 1 (ldet-sum a 0 n (1- n))))
+ (defun ldet-sum (a i n m)
+   (declare (xargs :measure (make-ord 1 (1+ (nfix m)) (nfix (- (nfix n) (nfix i))))))
+   (if (and (natp i) (natp n) (< i n))
+       (+ (* (cof-sign i) (entry i 0 a) (ldet (minor0 a i) m))
+          (ldet-sum a (1+ i) n m))
+     0)))
 
-(defthm upper-tri-aux-entry
-  (implies (and (upper-tri-aux a m) (natp m) (natp i) (natp j) (< j i) (< i m))
-           (equal (entry i j a) (r0)))
-  :hints (("Goal" :induct (upper-tri-aux a m))))
-
-(defthm upper-tri-entry
-  (implies (and (upper-tri a n) (natp n) (natp i) (natp j) (< j i) (< i n))
-           (equal (entry i j a) (r0))))
-
-;; From here on, triangularity is used only through UPPER-TRI-ENTRY.
-(in-theory (disable upper-tri))
-
-;; ---- the minor (0,0) of an upper-triangular matrix is upper triangular
-(defthm lower-zero-row-minor
-  (implies (and (rmatp a n n) (natp n) (> n 1) (upper-tri a n)
-                (natp r) (< r (1- n)) (natp s) (<= s r))
-           (lower-zero-row (minor 0 0 a) r s))
-  :hints (("Goal" :induct (lower-zero-row (minor 0 0 a) r s)
-                  :in-theory (enable entry-rmat-minor))))
-
-(defthm upper-tri-aux-minor
-  (implies (and (rmatp a n n) (natp n) (> n 1) (upper-tri a n)
-                (natp i) (<= i (1- n)))
-           (upper-tri-aux (minor 0 0 a) i))
-  :hints (("Goal" :induct (upper-tri-aux (minor 0 0 a) i))))
-
-(defthm upper-tri-minor
-  (implies (and (rmatp a n n) (natp n) (> n 1) (upper-tri a n))
-           (upper-tri (minor 0 0 a) (1- n)))
-  :hints (("Goal" :expand ((upper-tri (minor 0 0 a) (1- n))))))
-
-;; ---- product of the diagonal, through the minors
-(defun diag-prod (a n)
-  (if (zp n)
-      (r1)
-    (r* (entry 0 0 a) (diag-prod (minor 0 0 a) (1- n)))))
-
-;; ---- column-0 expansion of an upper-triangular matrix
-(defthm r0-times
-  (implies (rp x) (equal (r* (r0) x) (r0)))
-  :hints (("Goal" :use ((:instance r*comm (x (r0)) (y x))))))
-
-(defthm rp-expand-rdet-col-aux
-  (implies (and (rmatp a n n) (natp n) (> n 1)
-                (natp i) (<= i n) (natp j) (< j n))
-           (rp (expand-rdet-col-aux a i j n)))
-  :hints (("Goal" :induct (expand-rdet-col-aux a i j n))
-          ("Subgoal *1/2" :use ((:instance rp-entry (i (+ -1 i)) (m n))
-                                (:instance rp-rdet-cofactor (i (+ -1 i)))))))
-
-(defthm expand-col0-upper-tri
-  (implies (and (rmatp a n n) (natp n) (> n 1) (upper-tri a n)
-                (posp i) (<= i n))
-           (equal (expand-rdet-col-aux a i 0 n)
-                  (r* (entry 0 0 a) (rdet-cofactor 0 0 a n))))
-  :hints (("Goal" :induct (expand-rdet-col-aux a i 0 n))
-          ("Subgoal *1/2" :cases ((equal i 1)))
-          ("Subgoal *1/2.2"
-           :use ((:instance rp-entry (i 0) (j 0) (m n))
-                 (:instance rp-rdet-cofactor (i 0) (j 0))
-                 (:instance rp-rdet-cofactor (i (+ -1 i)) (j 0))))
-          ("Subgoal *1/2.1"
-           :use ((:instance rp-entry (i 0) (j 0) (m n))
-                 (:instance rp-rdet-cofactor (i 0) (j 0))))))
-
-(defthm rdet-upper-tri
-  (implies (and (rmatp a n n) (posp n) (upper-tri a n))
-           (equal (rdet a n) (diag-prod a n)))
-  :hints (("Goal" :induct (diag-prod a n))
-          ("Subgoal *1/2" :cases ((equal n 1)))
-          ("Subgoal *1/2.2"
-           :in-theory (enable expand-rdet-col rdet-cofactor)
-           :use ((:instance expand-rdet-col-rdet (k 0))
-                 (:instance rmatp-minor (i 0) (j 0))))
-          ("Subgoal *1/2.1"
-           :use ((:instance rp-entry (i 0) (j 0) (m 1) (n 1))))))
+;; ======================= upper triangular: entry (i,j) = 0 whenever j < i
+(defun c-lower-zero-row (a i j)
+  (if (zp j) t (and (equal (entry i (1- j) a) 0) (c-lower-zero-row a i (1- j)))))
+(defun c-upper-tri-aux (a i)
+  (if (zp i) t (and (c-lower-zero-row a (1- i) (1- i)) (c-upper-tri-aux a (1- i)))))
+(defun c-upper-tri (a n) (c-upper-tri-aux a n))
+(defun cl-prod (l) (if (consp l) (* (car l) (cl-prod (cdr l))) 1))
 
 (defun diag-list (a i n)
   (declare (xargs :measure (nfix (- n i))))
@@ -163,67 +96,91 @@
     nil))
 
 (defthm diag-list-end
-  (implies (not (< i n))
-           (equal (diag-list a i n) nil)))
+  (implies (not (< i n)) (equal (diag-list a i n) nil)))
+
+(defthm c-lower-zero-row-entry
+  (implies (and (c-lower-zero-row a i j) (natp j) (natp k) (< k j))
+           (equal (entry i k a) 0)))
+
+(defthm c-upper-tri-aux-entry
+  (implies (and (c-upper-tri-aux a m) (natp m) (natp i) (natp j) (< j i) (< i m))
+           (equal (entry i j a) 0))
+  :hints (("Goal" :induct (c-upper-tri-aux a m))))
+
+(defthm c-upper-tri-entry
+  (implies (and (c-upper-tri a n) (natp n) (natp i) (natp j) (< j i) (< i n))
+           (equal (entry i j a) 0)))
+
+;; From here on, triangularity is used only through C-UPPER-TRI-ENTRY.
+(in-theory (disable c-upper-tri))
+
+;; ---- the minor (0,0) of an upper-triangular matrix is upper triangular
+(defthm nth-del-col0
+  (equal (nth i (del-col0 b)) (cdr (nth i b))))
+
+(defthm nth-cdr-nat
+  (implies (natp i) (equal (nth i (cdr x)) (nth (1+ i) x))))
+
+(defthm entry-minor00
+  (implies (and (natp i) (natp j))
+           (equal (entry i j (minor0 a 0)) (entry (1+ i) (1+ j) a)))
+  :hints (("Goal" :in-theory (enable entry minor0 del-row))))
+
+(in-theory (disable minor0))
+
+(defthm c-lower-zero-row-minor
+  (implies (and (c-upper-tri a n) (natp n) (natp r) (< r (1- n)) (natp s) (<= s r))
+           (c-lower-zero-row (minor0 a 0) r s))
+  :hints (("Goal" :induct (c-lower-zero-row (minor0 a 0) r s))))
+
+(defthm c-upper-tri-aux-minor
+  (implies (and (c-upper-tri a n) (natp n) (natp i) (<= i (1- n)))
+           (c-upper-tri-aux (minor0 a 0) i))
+  :hints (("Goal" :induct (c-upper-tri-aux (minor0 a 0) i))))
+
+(defthm c-upper-tri-minor
+  (implies (and (c-upper-tri a n) (posp n))
+           (c-upper-tri (minor0 a 0) (1- n)))
+  :hints (("Goal" :use ((:instance c-upper-tri-aux-minor (i (1- n))))
+                  :expand ((c-upper-tri (minor0 a 0) (1- n))))))
 
 (defthm diag-list-minor
-  (implies (and (rmatp a n n) (natp n) (> n 1) (natp i) (<= i (1- n)))
-           (equal (diag-list (minor 0 0 a) i (1- n))
+  (implies (and (natp n) (natp i) (<= i (1- n)))
+           (equal (diag-list (minor0 a 0) i (1- n))
                   (diag-list a (1+ i) n)))
-  :hints (("Goal" :induct (diag-list (minor 0 0 a) i (1- n))
-                  :in-theory (enable entry-rmat-minor)
-                  :do-not '(eliminate-destructors generalize))))
+  :hints (("Goal" :induct (diag-list (minor0 a 0) i (1- n)))))
 
-(in-theory (disable (:executable-counterpart rlist-prod)
-                    (:executable-counterpart diag-prod)))
+;; ---- below the diagonal the column-0 entries vanish
+(defun sum-ind (i n)
+  (declare (xargs :measure (nfix (- n i))))
+  (if (and (natp i) (natp n) (< i n)) (sum-ind (1+ i) n) t))
 
-(defthm diag-prod-is-rlist-prod
-  (implies (and (rmatp a n n) (natp n))
-           (equal (diag-prod a n) (rlist-prod (diag-list a 0 n))))
-  :hints (("Goal" :induct (diag-prod a n))
-          ("Subgoal *1/2" :cases ((equal n 1)))
-          ("Subgoal *1/2.2" :use ((:instance rmatp-minor (i 0) (j 0))
-                                  (:instance diag-list-minor (i 0))))
-          ("Subgoal *1/2.1" :use ((:instance rp-entry (i 0) (j 0) (m 1) (n 1))))))
+(defthm ldet-sum-zero
+  (implies (and (c-upper-tri a n) (natp n) (posp i))
+           (equal (ldet-sum a i n m) 0))
+  :hints (("Goal" :induct (sum-ind i n))
+          ("Subgoal *1/1" :expand ((ldet-sum a i n m))
+                          :use ((:instance c-upper-tri-entry (j 0))))))
 
-(defthm rdet-upper-tri-diag
-  (implies (and (rmatp a n n) (posp n) (upper-tri a n))
-           (equal (rdet a n) (rlist-prod (diag-list a 0 n)))))
+(defun n-ind (a n) (if (zp n) a (n-ind (minor0 a 0) (1- n))))
 
+;; ---- THEOREM: the determinant of an upper-triangular matrix
+(defthm ldet-upper-tri
+  (implies (and (c-upper-tri a n) (natp n))
+           (equal (ldet a n) (cl-prod (diag-list a 0 n))))
+  :hints (("Goal" :induct (n-ind a n))
+          ("Subgoal *1/2" :expand ((ldet a n) (ldet-sum a 0 n (1- n))
+                                   (diag-list a 0 n))
+                          :use ((:instance ldet-sum-zero (i 1) (m (1- n)))
+                                (:instance c-upper-tri-minor)
+                                (:instance diag-list-minor (i 0))))))
 
-;; ======================= numeric copies (ring := ACL2 numbers)
+;; ======================= matrices of numbers
 (defun clistnp (x n)
   (if (zp n) (null x) (and (consp x) (acl2-numberp (car x)) (clistnp (cdr x) (1- n)))))
 (defun cmatp (a m n)
   (declare (xargs :measure (nfix m)))
   (if (zp m) (null a) (and (consp a) (clistnp (car a) n) (cmatp (cdr a) (1- m) n))))
-(defun cdet-prod (a p n)
-  (if (zp n) 1 (* (cdet-prod a p (1- n)) (entry (1- n) (nth (1- n) p) a))))
-(defun cdet-term (a p n)
-  (if (even-perm-p p n) (cdet-prod a p n) (- (cdet-prod a p n))))
-(defun cdet-sum (a l n)
-  (if (consp l) (+ (cdet-term a (car l) n) (cdet-sum a (cdr l) n)) 0))
-(defun cdet (a n) (cdet-sum a (slist n) n))
-(defun c-lower-zero-row (a i j)
-  (if (zp j) t (and (equal (entry i (1- j) a) 0) (c-lower-zero-row a i (1- j)))))
-(defun c-upper-tri-aux (a i)
-  (if (zp i) t (and (c-lower-zero-row a (1- i) (1- i)) (c-upper-tri-aux a (1- i)))))
-(defun c-upper-tri (a n) (c-upper-tri-aux a n))
-(defun cl-prod (l) (if (consp l) (* (car l) (cl-prod (cdr l))) 1))
-
-(defthm cdet-upper-tri
-  (implies (and (cmatp a n n) (posp n) (c-upper-tri a n))
-           (equal (cdet a n) (cl-prod (diag-list a 0 n))))
-  :hints (("Goal" :by (:functional-instance rdet-upper-tri-diag
-                        (rp acl2-numberp) (r+ binary-+) (r* binary-*)
-                        (r0 (lambda () 0)) (r1 (lambda () 1)) (r- unary--)
-                        (rlistnp clistnp) (rmatp cmatp)
-                        (rdet cdet) (rdet-sum cdet-sum) (rdet-term cdet-term)
-                        (rdet-prod cdet-prod)
-                        (lower-zero-row c-lower-zero-row)
-                        (upper-tri-aux c-upper-tri-aux) (upper-tri c-upper-tri)
-                        (rlist-prod cl-prod)))
-          ("Subgoal 1" :in-theory (enable rdet-term rdet upper-tri))))
 
 ;; ======================= s*I - A for a numeric matrix A
 (defun char-row (s a i j n)
@@ -325,10 +282,10 @@
 
 ;; ======================= THEOREM: characteristic polynomial of a triangular matrix
 (defthm char-poly-upper-tri
-  (implies (and (cmatp a n n) (posp n) (c-upper-tri a n) (acl2-numberp s))
-           (equal (cdet (char-mat s a n) n)
+  (implies (and (c-upper-tri a n) (natp n) (acl2-numberp s))
+           (equal (ldet (char-mat s a n) n)
                   (acl2::poly-eval (acl2::poly-from-roots (diag-list a 0 n)) s)))
-  :hints (("Goal" :use ((:instance cdet-upper-tri (a (char-mat s a n)))))))
+  :hints (("Goal" :use ((:instance ldet-upper-tri (a (char-mat s a n)))))))
 
 ;; ======================= numeric matrix product, identity, powers
 ;; sum_{t<k} a_it * b_tj
@@ -508,6 +465,7 @@
            (acl2::number-listp (diag-list a i n)))
   :hints (("Goal" :induct (diag-list a i n))))
 
+
 ;; ======================= MAIN THEOREM
 ;; For an upper-triangular n x n matrix A of ACL2 numbers:
 ;;  (1) det(sI - A) is the polynomial whose roots are the diagonal of A;
@@ -516,10 +474,11 @@
 (defthm char-poly-from-traces
   (implies (and (cmatp a n n) (posp n) (c-upper-tri a n)
                 (acl2-numberp s) (natp k) (<= k n))
-           (and (equal (cdet (char-mat s a n) n)
+           (and (equal (ldet (char-mat s a n) n)
                        (acl2::poly-eval (acl2::poly-from-roots (diag-list a 0 n)) s))
                 (equal (nth k (acl2::poly-from-roots (diag-list a 0 n)))
                        (* (expt -1 (- n k))
                           (car (e-from-traces (- n k) a n))))))
   :hints (("Goal" :use ((:instance acl2::coefficient-from-power-sums
-                                   (acl2::roots (diag-list a 0 n)) (acl2::k k))))))
+                                   (acl2::roots (diag-list a 0 n)) (acl2::k k))
+                        (:instance char-poly-upper-tri)))))
